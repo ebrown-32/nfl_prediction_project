@@ -5,6 +5,8 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import StandardScaler
 import numpy as np
 import nfl_data_py as nfl
+from tabulate import tabulate
+import datetime
 
 # Load and process NFL data
 """ years = [2022, 2023, 2024]
@@ -40,11 +42,9 @@ def create_sequence_features(df, qb_name, game_idx, max_history=8):
     """
     Create sequence of individual game features with better handling of missing values
     """
-    # Get previous games for this QB
     qb_games = df[df['passer_player_name'] == qb_name]
     previous_games = qb_games[qb_games.index < game_idx].tail(max_history)
     
-    # Create sequence of game stats
     sequence = []
     for _, game in previous_games.iterrows():
         game_stats = [
@@ -53,22 +53,28 @@ def create_sequence_features(df, qb_name, game_idx, max_history=8):
             game['pass_attempt'] if not np.isnan(game['pass_attempt']) else 0,
             game['air_yards'] if not np.isnan(game['air_yards']) else 0,
             game['yards_after_catch'] if not np.isnan(game['yards_after_catch']) else 0,
-            game['shotgun'] if not np.isnan(game['shotgun']) else 0,
-            game['qb_scramble'] if not np.isnan(game['qb_scramble']) else 0
+            game['qb_hit'] if not np.isnan(game['qb_hit']) else 0,
+            game['sack'] if not np.isnan(game['sack']) else 0,
+            game['short_passes'] if not np.isnan(game['short_passes']) else 0,
+            game['deep_passes'] if not np.isnan(game['deep_passes']) else 0,
+            game['left_passes'] if not np.isnan(game['left_passes']) else 0,
+            game['middle_passes'] if not np.isnan(game['middle_passes']) else 0,
+            game['right_passes'] if not np.isnan(game['right_passes']) else 0,
+            game['completion_percentage'] if not np.isnan(game['completion_percentage']) else 0,
+            game['yards_per_attempt'] if not np.isnan(game['yards_per_attempt']) else 0,
+            game['sack_rate'] if not np.isnan(game['sack_rate']) else 0,
+            game['deep_pass_rate'] if not np.isnan(game['deep_pass_rate']) else 0
         ]
         sequence.append(game_stats)
     
-    # Convert to numpy array
     sequence = np.array(sequence)
     
-    # Add recency weights if sequence is not empty
     if len(sequence) > 0:
         weights = np.exp(np.linspace(-2, 0, len(sequence)))
         sequence = sequence * weights[:, np.newaxis]
     
-    # Pad sequence if needed
     if len(sequence) < max_history:
-        padding = np.zeros((max_history - len(sequence), 7))
+        padding = np.zeros((max_history - len(sequence), 16))
         sequence = np.vstack([padding, sequence]) if len(sequence) > 0 else padding
     
     return sequence
@@ -87,21 +93,24 @@ def create_defense_sequence(df, def_team, game_idx, max_history=4):
             game['pass_touchdown'] if not np.isnan(game['pass_touchdown']) else 0,
             game['pass_attempt'] if not np.isnan(game['pass_attempt']) else 0,
             game['air_yards'] if not np.isnan(game['air_yards']) else 0,
-            game['yards_after_catch'] if not np.isnan(game['yards_after_catch']) else 0
+            game['yards_after_catch'] if not np.isnan(game['yards_after_catch']) else 0,
+            game['qb_hit'] if not np.isnan(game['qb_hit']) else 0,
+            game['sack'] if not np.isnan(game['sack']) else 0,
+            game['short_passes'] if not np.isnan(game['short_passes']) else 0,
+            game['deep_passes'] if not np.isnan(game['deep_passes']) else 0,
+            game['completion_percentage'] if not np.isnan(game['completion_percentage']) else 0,
+            game['sack_rate'] if not np.isnan(game['sack_rate']) else 0
         ]
         sequence.append(game_stats)
     
-    # Convert to numpy array
     sequence = np.array(sequence)
     
-    # Add recency weights if sequence is not empty
     if len(sequence) > 0:
         weights = np.exp(np.linspace(-1.5, 0, len(sequence)))
         sequence = sequence * weights[:, np.newaxis]
     
-    # Pad sequence if needed
     if len(sequence) < max_history:
-        padding = np.zeros((max_history - len(sequence), 5))
+        padding = np.zeros((max_history - len(sequence), 11))
         sequence = np.vstack([padding, sequence]) if len(sequence) > 0 else padding
     
     return sequence
@@ -121,7 +130,21 @@ for idx, row in df.iterrows():
     y_values.append([
         row['yards_gained'],
         row['pass_touchdown'],
-        row['pass_attempt']
+        row['interception'],
+        row['pass_attempt'],
+        row['air_yards'],
+        row['yards_after_catch'],
+        row['qb_hit'],
+        row['sack'],
+        row['short_passes'],
+        row['deep_passes'],
+        row['left_passes'],
+        row['middle_passes'],
+        row['right_passes'],
+        row['completion_percentage'],
+        row['yards_per_attempt'],
+        row['sack_rate'],
+        row['deep_pass_rate']
     ])
 
 # Convert to arrays
@@ -162,72 +185,75 @@ class QBDataset(Dataset):
             self.y[idx]
         )
 
-class QBPredictor(nn.Module):
-    def __init__(self, num_qbs, num_teams):
+class QBPerformancePredictor(nn.Module):
+    def __init__(self, num_qbs, num_teams, qb_seq_length=8, def_seq_length=4):
         super().__init__()
         
-        # Embeddings for QBs and teams
-        self.qb_embedding = nn.Embedding(num_qbs, 16)  # 16-dimensional QB embedding
-        self.team_embedding = nn.Embedding(num_teams, 8)  # 8-dimensional team embedding
+        # Feature dimensions
+        self.qb_feature_dim = 16   
+        self.def_feature_dim = 11  
+        self.hidden_dim = 64
         
-        # Layer Normalization for input sequences
-        self.qb_norm = nn.LayerNorm([8, 7])
-        self.def_norm = nn.LayerNorm([4, 5])
+        # Sequence processing
+        self.qb_norm = nn.LayerNorm([qb_seq_length, self.qb_feature_dim])
+        self.def_norm = nn.LayerNorm([def_seq_length, self.def_feature_dim])
         
-        # GRU layers
-        self.qb_gru = nn.GRU(
-            input_size=7,
-            hidden_size=32,
+        self.qb_lstm = nn.LSTM(
+            input_size=self.qb_feature_dim,
+            hidden_size=self.hidden_dim,
             num_layers=2,
             batch_first=True,
             dropout=0.1
         )
         
-        self.def_gru = nn.GRU(
-            input_size=5,
-            hidden_size=16,
+        self.def_lstm = nn.LSTM(
+            input_size=self.def_feature_dim,
+            hidden_size=self.hidden_dim,
             num_layers=2,
             batch_first=True,
             dropout=0.1
         )
         
-        # Fully connected layers with additional embedding inputs
-        self.fc = nn.Sequential(
-            nn.Linear(48 + 16 + 8, 64),  # Added dimensions for QB and team embeddings
-            nn.ReLU(),
-            nn.LayerNorm(64),
-            nn.Dropout(0.2),
-            
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.LayerNorm(32),
-            nn.Dropout(0.2),
-            
-            nn.Linear(32, 3)
-        )
-    
+        # Embeddings
+        self.qb_embedding = nn.Embedding(num_qbs, 16)
+        self.team_embedding = nn.Embedding(num_teams, 16)
+        
+        # Fully connected layers
+        self.fc1 = nn.Linear(2*self.hidden_dim + 32, 64)
+        self.fc2 = nn.Linear(64, 32)
+        self.fc3 = nn.Linear(32, 17)  # Updated to output 17 values
+        
+        self.dropout = nn.Dropout(0.1)
+        self.relu = nn.ReLU()
+
     def forward(self, qb_seq, def_seq, qb_idx, team_idx):
+        # Normalize sequences
+        qb_seq = self.qb_norm(qb_seq)
+        def_seq = self.def_norm(def_seq)
+        
+        # Process sequences
+        qb_out, _ = self.qb_lstm(qb_seq)
+        def_out, _ = self.def_lstm(def_seq)
+        
+        # Get final states
+        qb_final = qb_out[:, -1, :]
+        def_final = def_out[:, -1, :]
+        
         # Get embeddings
         qb_emb = self.qb_embedding(qb_idx)
         team_emb = self.team_embedding(team_idx)
         
-        # Process sequences
-        qb_seq = self.qb_norm(qb_seq)
-        def_seq = self.def_norm(def_seq)
+        # Concatenate all features
+        combined = torch.cat([qb_final, def_final, qb_emb, team_emb], dim=1)
         
-        # Process through GRU
-        _, qb_hidden = self.qb_gru(qb_seq)
-        _, def_hidden = self.def_gru(def_seq)
+        # Final prediction
+        x = self.relu(self.fc1(combined))
+        x = self.dropout(x)
+        x = self.relu(self.fc2(x))
+        x = self.dropout(x)
+        x = self.fc3(x)
         
-        # Combine all features
-        combined = torch.cat([
-            qb_hidden[-1],
-            def_hidden[-1],
-            qb_emb,
-            team_emb
-        ], dim=1)
-        
-        return self.fc(combined)
+        return x
 
 # Add this before creating the DataLoader
 print("\nChecking data for NaN values...")
@@ -249,7 +275,7 @@ test_loader = DataLoader(test_dataset, batch_size=16)
 
 # Initialize model, loss function, and optimizer
 print("Initializing model...")
-model = QBPredictor(
+model = QBPerformancePredictor(
     num_qbs=len(qb_to_idx),
     num_teams=len(team_to_idx)
 )
@@ -259,7 +285,7 @@ def init_weights(m):
     if isinstance(m, nn.Linear):
         torch.nn.init.xavier_uniform_(m.weight)
         m.bias.data.fill_(0.01)
-    elif isinstance(m, nn.GRU):
+    elif isinstance(m, nn.LSTM):
         for name, param in m.named_parameters():
             if 'weight' in name:
                 torch.nn.init.xavier_uniform_(param)
@@ -393,28 +419,140 @@ def predict_qb_performance(qb_name, opponent_team):
         predictions = y_scaler.inverse_transform(scaled_pred)
     
     return {
-        'yards': round(predictions[0][0], 1),
-        'touchdowns': round(predictions[0][1], 2),
-        'attempts': round(predictions[0][2], 1)
+        'yards': predictions[0][0],
+        'touchdowns': predictions[0][1],
+        'interception': predictions[0][2],
+        'attempts': predictions[0][3],
+        'air_yards': predictions[0][4],
+        'yards_after_catch': predictions[0][5],
+        'qb_hits': predictions[0][6],
+        'sacks': predictions[0][7],
+        'short_passes': predictions[0][8],
+        'deep_passes': predictions[0][9],
+        'left_passes': predictions[0][10],
+        'middle_passes': predictions[0][11],
+        'right_passes': predictions[0][12],
+        'completion_pct': predictions[0][13],
+        'yards_per_attempt': predictions[0][14],
+        'sack_rate': predictions[0][15],
+        'deep_pass_rate': predictions[0][16]
     }
 
-# Example predictions
-print("\nExample Predictions:")
-print("Trevor Lawrence vs Chiefs:")
-print(predict_qb_performance("T.Lawrence", "KC"))
-print("\nPatrick Mahomes vs Bills:")
-print(predict_qb_performance("P.Mahomes", "BUF"))
-print("\nPatrick Mahomes vs TEN:")
-print(predict_qb_performance("P.Mahomes", "TEN"))
-print("\nPatrick Mahomes vs JAX:")
-print(predict_qb_performance("P.Mahomes", "JAX"))
-print("\nPatrick Mahomes vs BAL:")
-print(predict_qb_performance("P.Mahomes", "BAL"))
-print("\nPatrick Mahomes vs LV:")
-print(predict_qb_performance("P.Mahomes", "LV"))
-print("\nJ.Burrow vs JAX:")
-print(predict_qb_performance("J.Burrow", "JAX"))
-print("\nJ.Burrow vs BAL:")
-print(predict_qb_performance("J.Burrow", "BAL"))
-print("\nJ.Burrow vs DEN:")
-print(predict_qb_performance("J.Burrow", "DEN"))
+def save_predictions_to_file(predictions_list, filename=None):
+    """
+    Save predictions to a formatted text file with raw values
+    """
+    if filename is None:
+        date = datetime.datetime.now().strftime("%Y%m%d")
+        filename = f"qb_predictions_{date}.txt"
+    
+    with open(filename, 'w') as f:
+        f.write(f"QB Performance Predictions - Generated on {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        for pred in predictions_list:
+            qb_name = pred['qb']
+            opponent = pred['opponent']
+            stats = pred['stats']
+            
+            f.write(f"\n{qb_name} vs {opponent}\n")
+            f.write("=" * 50 + "\n\n")
+            
+            # Core Stats Table
+            core_stats = [
+                ["Yards", stats['yards']],
+                ["Touchdowns", stats['touchdowns']],
+                ["Interception", stats['interception']],
+                ["Attempts", stats['attempts']],
+                ["Completion %", stats['completion_pct']],
+                ["Yards/Attempt", stats['yards_per_attempt']]
+            ]
+            f.write("Core Stats:\n")
+            f.write(tabulate(core_stats, tablefmt="grid") + "\n\n")
+            
+            # Pass Distribution Table
+            pass_dist = [
+                ["Short Passes", stats['short_passes']],
+                ["Deep Passes", stats['deep_passes']],
+                ["Deep Pass Rate", stats['deep_pass_rate']],
+                ["Left", stats['left_passes']],
+                ["Middle", stats['middle_passes']],
+                ["Right", stats['right_passes']]
+            ]
+            f.write("Pass Distribution:\n")
+            f.write(tabulate(pass_dist, tablefmt="grid") + "\n\n")
+            
+            # Protection Table
+            protection = [
+                ["QB Hits", stats['qb_hits']],
+                ["Sacks", stats['sacks']],
+                ["Sack Rate", stats['sack_rate']]
+            ]
+            f.write("Protection Metrics:\n")
+            f.write(tabulate(protection, tablefmt="grid") + "\n\n")
+            
+            # Yardage Table
+            yardage = [
+                ["Air Yards (Avg.)", stats['air_yards']],
+                ["Yards After Catch (Avg.)", stats['yards_after_catch']]
+            ]
+            f.write("Yardage Breakdown:\n")
+            f.write(tabulate(yardage, tablefmt="grid") + "\n\n")
+            f.write("\n" + "-" * 50 + "\n")
+
+# Create predictions list
+predictions_list = [
+    {
+        'qb': "Patrick Mahomes",
+        'opponent': "Bills",
+        'stats': predict_qb_performance("P.Mahomes", "BUF")
+    },
+    {
+        'qb': "Patrick Mahomes",
+        'opponent': "Titans",
+        'stats': predict_qb_performance("P.Mahomes", "TEN")
+    },
+    {
+        'qb': "Patrick Mahomes",
+        'opponent': "49ers",
+        'stats': predict_qb_performance("P.Mahomes", "SF")
+    },
+    {
+        'qb': "Patrick Mahomes",
+        'opponent': "Panthers",
+        'stats': predict_qb_performance("P.Mahomes", "CAR")
+    },
+    {
+        'qb': "Patrick Mahomes",
+        'opponent': "Raiders",
+        'stats': predict_qb_performance("P.Mahomes", "LV")
+    },
+    {
+        'qb': "Josh Allen",
+        'opponent': "Chiefs",
+        'stats': predict_qb_performance("J.Allen", "KC")
+    },
+    {
+        'qb': "Lamar Jackson",
+        'opponent': "49ers",
+        'stats': predict_qb_performance("L.Jackson", "SF")
+    },
+    {
+        'qb': "Brock Purdy",
+        'opponent': "Ravens",
+        'stats': predict_qb_performance("B.Purdy", "BAL")
+    }
+]
+
+# Save predictions to file
+save_predictions_to_file(predictions_list)
+
+# Still print to console as well
+print("\nPredictions have been saved to file!")
+print("Example prediction:")
+prediction = predictions_list[0]['stats']
+print("\nCore Stats:")
+print(f"Yards: {prediction['yards']}")
+print(f"Touchdowns: {prediction['touchdowns']}")
+print(f"Interceptions: {prediction['interception']}")
+
+
