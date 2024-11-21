@@ -38,13 +38,26 @@ df = pd.read_csv('game_data.csv')
 # Sort by game_id to ensure chronological order
 df = df.sort_values('game_id')
 
-def create_sequence_features(df, qb_name, game_idx, max_history=8):
+def create_sequence_features(df, qb_name, game_idx, max_history=16):
     """
-    Create sequence of individual game features with better handling of missing values
+    Creates a sequence of game statistics for a quarterback's recent performances.
+    
+    Sequence Processing Explanation:
+    - In NFL analysis, the order of games matters (recent form, development, etc.)
+    - We take the last 16 games (max_history) for each QB
+    - More recent games are weighted more heavily using exponential weighting
+    
+    Example:
+    For Patrick Mahomes predicting Week 10:
+    - Week 9: weight = 1.0
+    - Week 8: weight = 0.87
+    - Week 7: weight = 0.76
+    ...and so on, giving more importance to recent performances
     """
     qb_games = df[df['passer_player_name'] == qb_name]
     previous_games = qb_games[qb_games.index < game_idx].tail(max_history)
     
+    # Create sequence with exponential weighting
     sequence = []
     for _, game in previous_games.iterrows():
         game_stats = [
@@ -69,6 +82,7 @@ def create_sequence_features(df, qb_name, game_idx, max_history=8):
     
     sequence = np.array(sequence)
     
+    # Apply exponential weighting to emphasize recent games
     if len(sequence) > 0:
         weights = np.exp(np.linspace(-2, 0, len(sequence)))
         sequence = sequence * weights[:, np.newaxis]
@@ -79,7 +93,7 @@ def create_sequence_features(df, qb_name, game_idx, max_history=8):
     
     return sequence
 
-def create_defense_sequence(df, def_team, game_idx, max_history=4):
+def create_defense_sequence(df, def_team, game_idx, max_history=8):
     """
     Create sequence of defensive performances with better handling of missing values
     """
@@ -186,26 +200,62 @@ class QBDataset(Dataset):
         )
 
 class QBPerformancePredictor(nn.Module):
-    def __init__(self, num_qbs, num_teams, qb_seq_length=8, def_seq_length=4):
+    """
+    Neural network using LSTM (Long Short-Term Memory) architecture for QB prediction.
+    
+    LSTM Explanation:
+    - LSTM is a type of RNN (Recurrent Neural Network) that can learn long-term dependencies
+    - Unlike simple RNNs, LSTMs can "remember" important information and "forget" irrelevant details
+    
+    LSTM Components:
+    1. Forget Gate (f_t): Decides what information to throw away
+       f_t = σ(W_f · [h_t-1, x_t] + b_f)
+    
+    2. Input Gate (i_t): Decides what new information to store
+       i_t = σ(W_i · [h_t-1, x_t] + b_i)
+    
+    3. Cell State (C_t): The memory of the network
+       C_t = f_t * C_t-1 + i_t * tanh(W_c · [h_t-1, x_t] + b_c)
+    
+    4. Output Gate (o_t): Decides what parts of the cell state to output
+       o_t = σ(W_o · [h_t-1, x_t] + b_o)
+    
+    In QB Context:
+    - Input sequence: Last 16 games of QB stats
+    - Cell state: Maintains important long-term performance patterns
+    - Gates: Learn what patterns are predictive of future performance
+    """
+    def __init__(self, num_qbs, num_teams, qb_seq_length=16, def_seq_length=8):
         super().__init__()
         
-        # Feature dimensions
-        self.qb_feature_dim = 16   
-        self.def_feature_dim = 11  
-        self.hidden_dim = 64
+        # Dimensions for sequence processing
+        self.qb_feature_dim = 16   # Statistical features per QB game
+        self.def_feature_dim = 11  # Statistical features per defensive performance
+        self.hidden_dim = 64       # Dimension of LSTM hidden states
         
-        # Sequence processing
+        # Layer normalization for input sequences
         self.qb_norm = nn.LayerNorm([qb_seq_length, self.qb_feature_dim])
         self.def_norm = nn.LayerNorm([def_seq_length, self.def_feature_dim])
         
+        # LSTM layers for sequence processing
+        # QB LSTM: Processes historical game sequences with exponentially weighted recency
         self.qb_lstm = nn.LSTM(
-            input_size=self.qb_feature_dim,
-            hidden_size=self.hidden_dim,
-            num_layers=2,
-            batch_first=True,
-            dropout=0.1
+            input_size=self.qb_feature_dim,    # Number of stats per game
+            hidden_size=self.hidden_dim,       # Size of internal state
+            num_layers=2,                      # Stacked LSTMs for more complexity
+            batch_first=True,                  # Input shape: (batch, seq, feature)
+            dropout=0.1                        # Prevent overfitting
         )
+        """
+        QB LSTM Process:
+        1. Takes sequence of 16 games: X = [x₁, x₂, ..., x₁₆]
+        2. Each game xᵢ has features: [yards, touchdowns, attempts, ...]
+        3. LSTM processes games in order, updating its state:
+           h_t = LSTM(x_t, h_{t-1})
+        4. Final state h₁₆ contains summary of QB's recent performance trends
+        """
         
+        # Defense LSTM: Processes opponent's defensive performance history
         self.def_lstm = nn.LSTM(
             input_size=self.def_feature_dim,
             hidden_size=self.hidden_dim,
@@ -214,44 +264,80 @@ class QBPerformancePredictor(nn.Module):
             dropout=0.1
         )
         
-        # Embeddings
-        self.qb_embedding = nn.Embedding(num_qbs, 16)
-        self.team_embedding = nn.Embedding(num_teams, 16)
+        # Identity embeddings
+        # Maps discrete QB/Team identities to continuous vectors
+        self.qb_embedding_dim = 64    # Higher dim for QB (more complex patterns)
+        self.team_embedding_dim = 32   # Lower dim for defense (less complex patterns)
         
-        # Fully connected layers
-        self.fc1 = nn.Linear(2*self.hidden_dim + 32, 64)
+        self.qb_embedding = nn.Embedding(num_qbs, self.qb_embedding_dim)
+        self.team_embedding = nn.Embedding(num_teams, self.team_embedding_dim)
+        
+        # QB-specific attention for focusing on relevant historical patterns
+        self.qb_attention = nn.MultiheadAttention(embed_dim=self.hidden_dim, num_heads=4)
+        
+        # Conditional processing based on QB identity
+        self.qb_specific_layer = nn.Linear(self.qb_embedding_dim, self.hidden_dim)
+        
+        # Fully connected layers for final prediction
+        # Input: concatenated [QB sequence, Defense sequence, QB embedding, Team embedding]
+        fc1_input_size = (2 * self.hidden_dim) + self.qb_embedding_dim + self.team_embedding_dim
+        self.fc1 = nn.Linear(fc1_input_size, 64)
         self.fc2 = nn.Linear(64, 32)
-        self.fc3 = nn.Linear(32, 17)  # Updated to output 17 values
+        self.fc3 = nn.Linear(32, 17)  # 17 statistical categories to predict
         
         self.dropout = nn.Dropout(0.1)
         self.relu = nn.ReLU()
 
     def forward(self, qb_seq, def_seq, qb_idx, team_idx):
-        # Normalize sequences
+        """
+        Forward pass showing how sequences are processed.
+        
+        Sequence Processing Steps:
+        1. Normalize sequences to stabilize learning:
+           qb_seq = LayerNorm(qb_seq)
+        
+        2. Process through LSTM:
+           - Input: [batch_size, 16 games, 16 features]
+           - LSTM maintains internal state for each game
+           - Output: [batch_size, 16 games, hidden_dim]
+        
+        3. Take final state as sequence summary:
+           qb_final = qb_out[:, -1, :]
+        
+        Example for one QB:
+        - Input: Last 16 games of stats
+        - LSTM processes each game in order
+        - Final output combines recent form, long-term patterns, and trends
+        """
+        # Process QB sequence through LSTM
         qb_seq = self.qb_norm(qb_seq)
+        qb_out, _ = self.qb_lstm(qb_seq)    # Process all 16 games
+        qb_final = qb_out[:, -1, :]         # Take final state as summary
+        
+        # Normalize sequences
         def_seq = self.def_norm(def_seq)
         
-        # Process sequences
-        qb_out, _ = self.qb_lstm(qb_seq)
-        def_out, _ = self.def_lstm(def_seq)
+        # Process sequences through LSTMs
+        qb_out, _ = self.qb_lstm(qb_seq)    # [batch, seq_len, hidden_dim]
+        def_out, _ = self.def_lstm(def_seq)  # [batch, seq_len, hidden_dim]
         
-        # Get final states
-        qb_final = qb_out[:, -1, :]
-        def_final = def_out[:, -1, :]
+        # Get final sequence states
+        qb_final = qb_out[:, -1, :]         # [batch, hidden_dim]
+        def_final = def_out[:, -1, :]       # [batch, hidden_dim]
         
-        # Get embeddings
-        qb_emb = self.qb_embedding(qb_idx)
-        team_emb = self.team_embedding(team_idx)
+        # Get identity embeddings
+        qb_emb = self.qb_embedding(qb_idx)   # [batch, qb_embedding_dim]
+        team_emb = self.team_embedding(team_idx)  # [batch, team_embedding_dim]
         
-        # Concatenate all features
+        # Combine all features
         combined = torch.cat([qb_final, def_final, qb_emb, team_emb], dim=1)
         
-        # Final prediction
+        # Final prediction layers
         x = self.relu(self.fc1(combined))
         x = self.dropout(x)
         x = self.relu(self.fc2(x))
         x = self.dropout(x)
-        x = self.fc3(x)
+        x = self.fc3(x)  # Final prediction of 17 statistical categories
         
         return x
 
@@ -440,7 +526,7 @@ def predict_qb_performance(qb_name, opponent_team):
 
 def save_predictions_to_file(predictions_list, filename=None):
     """
-    Save predictions to a formatted text file with raw values
+    Save predictions to a formatted text file
     """
     if filename is None:
         date = datetime.datetime.now().strftime("%Y%m%d")
@@ -540,6 +626,21 @@ predictions_list = [
         'qb': "Brock Purdy",
         'opponent': "Ravens",
         'stats': predict_qb_performance("B.Purdy", "BAL")
+    },
+    {
+        'qb': "Brock Purdy",
+        'opponent': "Panthers",
+        'stats': predict_qb_performance("B.Purdy", "CAR")
+    },
+    {
+        'qb': "Russell Wilson",
+        'opponent': "Browns",
+        'stats': predict_qb_performance("R.Wilson", "CLE")
+    },
+    {
+        'qb': "Jameis Winston",
+        'opponent': "Steelers",
+        'stats': predict_qb_performance("J.Winston", "PIT")
     }
 ]
 
@@ -548,11 +649,5 @@ save_predictions_to_file(predictions_list)
 
 # Still print to console as well
 print("\nPredictions have been saved to file!")
-print("Example prediction:")
-prediction = predictions_list[0]['stats']
-print("\nCore Stats:")
-print(f"Yards: {prediction['yards']}")
-print(f"Touchdowns: {prediction['touchdowns']}")
-print(f"Interceptions: {prediction['interception']}")
 
 
