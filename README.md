@@ -1,35 +1,239 @@
-Author: ebrown
+# NFL Quarterback Performance Predictor
 
-Requires play-by-play dataset:
-Docs: https://pypi.org/project/nfl-data-py/
+## Overview
+This deep learning model predicts NFL quarterback performance statistics for hypothetical matchups using historical game data and advanced sequence processing techniques. The model combines historical performance data, quarterback-specific characteristics, and defensive matchup information to generate comprehensive statistical predictions.
 
-import nfl_data_py as nfl
+## Table of Contents
+1. [Mathematical Framework](#mathematical-framework)
+2. [Model Architecture](#model-architecture)
+3. [Data Processing](#data-processing)
+4. [Usage](#usage)
+5. [Model Evaluation](#model-evaluation)
+6. [Installation](#installation)
+7. [Future Improvements](#future-improvements)
 
-play_by_play = nfl.import_pbp_data(years, downcast=True, cache=False, alt_path=None)
+## Mathematical Framework
 
-play_by_play.to_csv("pbp_data.csv") 
+### Input Components
 
+The model processes four key input components:
 
-### How It Works
-1. **Model Training**:
+#### 1. QB Historical Sequence (X_q)
+- Dimension: ℝ^(16×16) (16 games × 16 features)
+- Features include: yards, touchdowns, attempts, completion percentage, etc.
+- Exponentially weighted for recency:
+  ```
+  w_t = exp(-λ(T-t))
+  where:
+  - t is the game index
+  - T is the most recent game
+  - λ is the decay factor
+  ```
 
-   - The model is trained on a dataset that includes all games played by all quarterbacks. This dataset contains various features (like pass attempts, air yards, yards after catch, etc.) and the target variable (passing yards).
-   
-   - The model learns patterns from this comprehensive dataset, understanding how different features correlate with passing yards.
+#### 2. Defense Historical Sequence (X_d)
+- Dimension: ℝ^(8×11) (8 games × 11 features)
+- Captures defensive performance patterns
+- Similarly weighted for recency
 
-2. **Prediction Process**:
+#### 3. QB Identity Embedding (E_q)
+- Dimension: ℝ⁶⁴
+- Learned representation of quarterback-specific traits
+- Maps discrete QB identity to continuous vector space
 
-   - When you want to predict the passing yards for a specific QB (e.g., P.Mahomes) against a specific opponent (e.g., BAL), the function retrieves all historical games played by that QB.
-   
-   - For each of those games, it creates a hypothetical scenario where the QB plays against the new opponent. This includes:
+#### 4. Team Identity Embedding (E_d)
+- Dimension: ℝ³²
+- Learned representation of defensive team characteristics
+
+### LSTM Architecture
+
+The model uses Long Short-Term Memory (LSTM) networks to process sequential data. The LSTM cell is defined by:
+
+```
+f_t = σ(W_f · [h_t-1, x_t] + b_f)    # Forget gate
+i_t = σ(W_i · [h_t-1, x_t] + b_i)    # Input gate
+C̃_t = tanh(W_c · [h_t-1, x_t] + b_c) # Candidate cell state
+C_t = f_t * C_t-1 + i_t * C̃_t        # Cell state
+o_t = σ(W_o · [h_t-1, x_t] + b_o)    # Output gate
+h_t = o_t * tanh(C_t)                # Hidden state
+```
+
+Where:
+- h_t is the hidden state at time t
+- C_t is the cell state at time t
+- x_t is the input at time t
+- W and b are learned parameters
+- σ is the sigmoid function
+
+### Prediction Process
+
+1. **Sequence Normalization**:
+   ```
+   X̂_q = LayerNorm(X_q)
+   X̂_d = LayerNorm(X_d)
+   ```
+
+2. **LSTM Processing**:
+   ```
+   h_q = LSTM(X̂_q)
+   h_d = LSTM(X̂_d)
+   ```
+
+3. **Feature Combination**:
+   ```
+   z = concat[h_q, h_d, E_q, E_d]
+   ```
+
+4. **Final Prediction**:
+   ```
+   y = MLP(z)
+   ```
+   where y ∈ ℝ¹⁷ represents 17 predicted statistical categories
+
+## Model Architecture
+
+### Network Components
+
+1. **Layer Normalization**
+   - Stabilizes learning by normalizing input sequences
+   - Applied to both QB and defensive sequences
+
+2. **LSTM Layers**
+   - 2 stacked LSTM layers for both QB and defense sequences
+   - Hidden dimension: 64
+   - Dropout: 0.1
+   - Batch-first processing
+
+3. **Attention Mechanism**
+   - Multi-head attention (4 heads)
+   - Helps focus on relevant historical patterns
+   - Dimension: 64
+
+4. **Fully Connected Layers**
+   - FC1: Input → 64 units
+   - FC2: 64 → 32 units
+   - FC3: 32 → 17 units (final predictions)
+   - ReLU activation between layers
+   - Dropout: 0.1
+
+## Data Processing
+
+### Input Data
+- Source: NFL play-by-play data (2022-2024)
+- Aggregated to game level
+- Features normalized using StandardScaler
+- Sequences padded to fixed length
+
+### Sequence Creation
+```python
+def create_sequence_features(df, qb_name, game_idx, max_history=16):
+    # Get QB's previous games
+    qb_games = df[df['passer_player_name'] == qb_name]
+    previous_games = qb_games[qb_games.index < game_idx].tail(max_history)
     
-     - Setting the opponent's defensive stats (like yards allowed per game, TDs allowed, etc.) based on the new opponent.
-     
-     - Keeping the QB's performance metrics from each historical game intact.
+    # Create and weight sequence
+    sequence = []
+    for _, game in previous_games.iterrows():
+        game_stats = [
+            game['yards_gained'],
+            game['pass_touchdown'],
+            # ... other stats
+        ]
+        sequence.append(game_stats)
+```
 
+## Usage
 
-3. **Making Predictions**:
+### Installation
+```bash
+pip install -r requirements.txt
+```
 
-   - The model then predicts passing yards for each of these historical game patterns against the new opponent.
-   
-   - This results in multiple predictions (one for each historical game), which can be averaged or analyzed to provide a final prediction.
+### Making Predictions
+```python
+# Initialize model
+model = QBPerformancePredictor(
+    num_qbs=len(qb_to_idx),
+    num_teams=len(team_to_idx)
+)
+
+# Make prediction
+predictions = predict_qb_performance(
+    qb_name="Patrick Mahomes",
+    opponent_team="Bills"
+)
+
+# Save predictions
+save_predictions_to_file(predictions_list)
+```
+
+### Output Format
+```python
+{
+    'yards': 285.5,
+    'touchdowns': 2.3,
+    'interception': 0.8,
+    'attempts': 35.2,
+    # ... other stats
+}
+```
+
+## Model Evaluation
+
+### Training Process
+- Batch size: 16
+- Learning rate: 0.0001
+- Weight decay: 1e-5
+- Early stopping patience: 10
+- Train/Test split: 80/20
+
+### Metrics
+- Mean Squared Error (MSE) for continuous statistics
+- Validation loss monitoring
+- Gradient clipping at 0.5
+
+### Error Handling
+- NaN detection and cleaning
+- Gradient explosion prevention
+- Sequence padding management
+
+## Installation
+
+### Requirements
+- Python 3.8+
+- PyTorch 2.0+
+- NumPy
+- Pandas
+- scikit-learn
+
+### Setup
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Download or prepare NFL play-by-play data
+4. Run the model
+
+## Future Improvements
+
+1. **Data Enhancements**
+   - Add weather condition effects
+   - Incorporate offensive line performance
+   - Add receiver corps quality metrics
+   - Include home/away factors
+
+2. **Model Architecture**
+   - Implement transformer architecture
+   - Add positional encoding
+   - Explore different attention mechanisms
+   - Implement hierarchical LSTM
+
+3. **Feature Engineering**
+   - Create advanced defensive metrics
+   - Add game context features
+   - Develop QB style classifications
+
+4. **Prediction Capabilities**
+   - Add confidence intervals
+   - Implement ensemble methods
+   - Add probability distributions for predictions
