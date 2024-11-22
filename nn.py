@@ -8,6 +8,20 @@ import nfl_data_py as nfl
 from tabulate import tabulate
 import datetime
 
+"""
+Author: ebrown
+Date: 11/20/2024
+Purpose: Predict QB performance in an upcoming (hypothetical) NFL game based on recent form and opponent defense
+Contributors: shout out to Claude Sonnet 3.5 for assistance with the architecture implementation
+"""
+
+#TODO:
+# - Add weather conditions
+# - Add home/away factor
+# - Add formations
+# - Add receiver corps quality metrics
+# Adjust recent game weighting... maybe linear is better?
+
 # Load and process NFL data
 """ years = [2022, 2023, 2024]
 
@@ -43,7 +57,7 @@ def create_sequence_features(df, qb_name, game_idx, max_history=16):
     Creates a sequence of game statistics for a quarterback's recent performances.
     
     Sequence Processing Explanation:
-    - In NFL analysis, the order of games matters (recent form, development, etc.)
+    - Design decision: the order of games matters (recent form, development, etc.)
     - We take the last 16 games (max_history) for each QB
     - More recent games are weighted more heavily using exponential weighting
     
@@ -179,13 +193,41 @@ train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=42)
 qb_to_idx = {qb: idx for idx, qb in enumerate(df['passer_player_name'].unique())}
 team_to_idx = {team: idx for idx, team in enumerate(df['defteam'].unique())}
 
-class QBDataset(Dataset):
+""" 
+Each index has a unique integer value mapped to a string (name of QB or team)
+
+# Example of what qb_to_idx might look like:
+qb_to_idx = {
+    "P.Mahomes": 0,
+    "J.Allen": 1,
+    "L.Jackson": 2,
+    # ... and so on
+}
+
+# Example of what team_to_idx might look like:
+team_to_idx = {
+    "KC": 0,
+    "BUF": 1,
+    "BAL": 2,
+    # ... and so on
+} """
+
+class NFLDataset(Dataset):
     def __init__(self, X_qb, X_def, y, qb_names, def_teams, indices):
-        self.X_qb = torch.FloatTensor(X_qb[indices])
-        self.X_def = torch.FloatTensor(X_def[indices])
-        self.y = torch.FloatTensor(y[indices])
+        """
+        Parameters:
+        - X_qb: QB sequence data
+        - X_def: Defensive team sequence data
+        - y: Target statistics
+        - qb_names: Names of QBs (e.g., "P.Mahomes")
+        - def_teams: Names of defensive teams (e.g., "BUF" when predicting Mahomes vs Bills)
+        - indices: Which samples to include in this dataset
+        """
+        self.X_qb = torch.FloatTensor(X_qb[indices])          
+        self.X_def = torch.FloatTensor(X_def[indices])        
+        self.y = torch.FloatTensor(y[indices])                
         self.qb_idx = torch.LongTensor([qb_to_idx[qb] for qb in qb_names[indices]])
-        self.team_idx = torch.LongTensor([team_to_idx[team] for team in def_teams[indices]])
+        self.team_idx = torch.LongTensor([team_to_idx[team] for team in def_teams[indices]]) 
     
     def __len__(self):
         return len(self.y)
@@ -202,6 +244,10 @@ class QBDataset(Dataset):
 class QBPerformancePredictor(nn.Module):
     """
     Neural network using LSTM (Long Short-Term Memory) architecture for QB prediction.
+    
+    https://en.wikipedia.org/wiki/Long_short-term_memory
+    https://en.wikipedia.org/wiki/Recurrent_neural_network
+    https://upload.wikimedia.org/wikipedia/commons/thumb/9/93/LSTM_Cell.svg/300px-LSTM_Cell.svg.png
     
     LSTM Explanation:
     - LSTM is a type of RNN (Recurrent Neural Network) that can learn long-term dependencies
@@ -228,10 +274,9 @@ class QBPerformancePredictor(nn.Module):
     def __init__(self, num_qbs, num_teams, qb_seq_length=16, def_seq_length=8):
         super().__init__()
         
-        # Dimensions for sequence processing
-        self.qb_feature_dim = 16   # Statistical features per QB game
-        self.def_feature_dim = 11  # Statistical features per defensive performance
-        self.hidden_dim = 64       # Dimension of LSTM hidden states
+        self.qb_feature_dim = 16 
+        self.def_feature_dim = 11 
+        self.hidden_dim = 64 
         
         # Layer normalization for input sequences
         self.qb_norm = nn.LayerNorm([qb_seq_length, self.qb_feature_dim])
@@ -341,20 +386,19 @@ class QBPerformancePredictor(nn.Module):
         
         return x
 
-# Add this before creating the DataLoader
+# Check for NaN values (could indicate problem with data preparation script)
 print("\nChecking data for NaN values...")
 print(f"X_qb NaN count: {np.isnan(X_qb).sum()}")
 print(f"X_def NaN count: {np.isnan(X_def).sum()}")
 print(f"y NaN count: {np.isnan(y).sum()}")
 
-# If there are NaN values, we should clean them:
 X_qb = np.nan_to_num(X_qb, 0)
 X_def = np.nan_to_num(X_def, 0)
 y = np.nan_to_num(y, 0)
 
 # Create data loaders with smaller batch size
-train_dataset = QBDataset(X_qb, X_def, y_scaled, df['passer_player_name'], df['defteam'], train_idx)
-test_dataset = QBDataset(X_qb, X_def, y_scaled, df['passer_player_name'], df['defteam'], test_idx)
+train_dataset = NFLDataset(X_qb, X_def, y_scaled, df['passer_player_name'], df['defteam'], train_idx)
+test_dataset = NFLDataset(X_qb, X_def, y_scaled, df['passer_player_name'], df['defteam'], test_idx)
 
 train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=16)
@@ -388,53 +432,74 @@ def stable_mse_loss(pred, target):
 criterion = stable_mse_loss
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-5)
 
-# Training loop with better monitoring
+# Training loop
 print("Starting training...")
 num_epochs = 100
 best_val_loss = float('inf')
-patience = 10
+patience = 10  # Number of epochs to wait before early stopping
 patience_counter = 0
 
 for epoch in range(num_epochs):
-    model.train()
+    """
+    Training Process (per epoch):
+    1. Training Phase:
+       - Process mini-batches of data
+       - Update model weights to minimize loss
+       - Track total loss for monitoring
+    
+    2. Validation Phase:
+       - Evaluate model on unseen data
+       - Check for improvement
+       - Implement early stopping if needed
+    """
+    model.train()  # Set model to training mode (enables dropout, etc.)
     total_loss = 0
     batch_count = 0
     skipped_batches = 0
     
+    # Training Phase
     for qb_seq, def_seq, qb_idx, team_idx, y_batch in train_loader:
+        """
+        Mini-batch Processing:
+        - qb_seq: Sequence of QB's last 16 games [batch_size, 16, 16]
+        - def_seq: Sequence of defense's last 8 games [batch_size, 8, 11]
+        - qb_idx: QB identity numbers [batch_size]
+        - team_idx: Defensive team identity numbers [batch_size]
+        - y_batch: Target statistics to predict [batch_size, 17]
+        """
         # Check for invalid values
         if torch.isnan(qb_seq).any() or torch.isnan(def_seq).any():
             skipped_batches += 1
             continue
             
-        # Forward pass
+        # Forward pass: QB stats = model(QB history, Defense history, QB identity, Defense identity)
         y_pred = model(qb_seq, def_seq, qb_idx, team_idx)
         loss = criterion(y_pred, y_batch)
         
-        # Skip bad batches
+        # Skip bad batches (NaN loss)
         if torch.isnan(loss):
             skipped_batches += 1
             continue
             
-        # Backward pass
-        optimizer.zero_grad()
-        loss.backward()
+        # Backward pass (3 steps)
+        optimizer.zero_grad()        # 1. Clear previous gradients
+        loss.backward()              # 2. Compute new gradients
         
-        # Clip gradients
+        # Clip gradients to prevent explosion
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
         
-        optimizer.step()
+        optimizer.step()             # 3. Update model weights
         
         total_loss += loss.item()
         batch_count += 1
     
-    # Validation
-    model.eval()
+    # Validation Phase
+    model.eval()  # Set model to evaluation mode (disables dropout, etc.)
     val_loss = 0
     val_batch_count = 0
     val_skipped = 0
     
-    with torch.no_grad():
+    with torch.no_grad():  # Disable gradient computation for validation
         for qb_seq, def_seq, qb_idx, team_idx, y_batch in test_loader:
             if torch.isnan(qb_seq).any() or torch.isnan(def_seq).any():
                 val_skipped += 1
@@ -449,7 +514,7 @@ for epoch in range(num_epochs):
             else:
                 val_skipped += 1
     
-    # Calculate average losses
+    # Calculate average losses for epoch
     if batch_count > 0:
         avg_train_loss = total_loss / batch_count
     else:
@@ -462,6 +527,7 @@ for epoch in range(num_epochs):
         avg_val_loss = float('nan')
         print(f"Warning: All validation batches were skipped in epoch {epoch+1}")
     
+    # Print progress every 10 epochs
     if (epoch + 1) % 10 == 0:
         print(f'Epoch [{epoch+1}/{num_epochs}]')
         print(f'Training Loss: {avg_train_loss:.4f} (processed {batch_count}/{len(train_loader)} batches)')
@@ -472,7 +538,21 @@ for epoch in range(num_epochs):
             print(f'Skipped {val_skipped} validation batches due to NaN values')
         print()
     
-    # Early stopping
+    # Early stopping logic
+    """
+    Early Stopping:
+    - Track best validation loss seen so far
+    - If validation loss doesn't improve for 'patience' epochs, stop training
+    - Helps prevent overfitting by stopping when model stops improving
+    
+    Example:
+    Epoch 20: val_loss = 0.5 (best so far) → patience_counter = 0
+    Epoch 21: val_loss = 0.6 → patience_counter = 1
+    Epoch 22: val_loss = 0.7 → patience_counter = 2
+    ...
+    Epoch 29: val_loss = 0.8 → patience_counter = 9
+    Epoch 30: val_loss = 0.9 → patience_counter = 10 → Stop training
+    """
     if not np.isnan(avg_val_loss):
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
@@ -585,7 +665,7 @@ def save_predictions_to_file(predictions_list, filename=None):
             f.write(tabulate(yardage, tablefmt="grid") + "\n\n")
             f.write("\n" + "-" * 50 + "\n")
 
-# Create predictions list
+# List of QBs and opponents to predict
 predictions_list = [
     {
         'qb': "Patrick Mahomes",

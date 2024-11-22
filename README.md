@@ -211,8 +211,8 @@ save_predictions_to_file(predictions_list)
    ```bash
    pip install -r requirements.txt
    ```
-3. Download or prepare NFL play-by-play data
-4. Run the model
+3. Run the data_preparation.py script to generate the 'game_data.csv' file that the model will use to train.
+4. Train the model and make predictions with the nn.py script!
 
 ## Future Improvements
 
