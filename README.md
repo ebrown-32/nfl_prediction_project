@@ -90,6 +90,20 @@ Where:
    where y ∈ ℝ¹⁷ represents 17 predicted statistical categories
 
 ## Model Architecture
+Input → Normalization → LSTM Processing → Embeddings → Attention → Dense Layers → Prediction
+
+QB Data    →  Norm → LSTM(2) ↘
+                            → Concat → Attention → Dense(3) → Output
+Defense Data → Norm → LSTM(2) ↗
+
+Total Layer Count: 12 main layers
+Input Normalization (2)
+QB LSTM Stack (2)
+Defense LSTM Stack (2)
+Embeddings (2)
+Attention Layer (1)
+QB-specific Layer (1)
+Final Dense Layers (3)
 
 ### Network Components
 
