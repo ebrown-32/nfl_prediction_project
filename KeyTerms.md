@@ -14,9 +14,91 @@ Just like how a human scout would remember key trends but forget unimportant det
 **Technical**: Dense vector representations of discrete entities
 **Simple Explanation**: Converting names into numbers in a smart way. Instead of just saying "Patrick Mahomes = 1", we create a detailed numerical "profile" that captures different aspects of his playing style. Like having multiple scores for different skills.
 
+Example:
+QB Name → Integer → Learned Embedding Vector
+"P.Mahomes" → 0 → [0.75, 0.82, -0.23, ..., 0.45]  # 64 numbers
+"J.Allen"   → 1 → [0.62, -0.45, 0.31, ..., 0.28]  # 64 numbers
+"L.Jackson" → 2 → [0.91, 0.15, 0.44, ..., -0.12]  # 64 numbers
+
 ### Layer Normalization
 **Technical**: Normalizes inputs across features to stabilize training
 **Simple Explanation**: Like grading on a curve in school - converts all numbers to a similar scale so they can be compared fairly. This helps the model learn without being overwhelmed by very large or very small numbers.
+
+## Neural Network Layers
+
+### Hidden Layers
+**Technical**: Internal layers between input and output that learn representations of the data
+**Simple Explanation**: Like the brain's internal processing steps between seeing something and making a decision.
+
+**Our Model's Hidden Layers**:
+```
+Input → Hidden Layers → Output
+[Raw Stats] → [64] → [32] → [5 predictions]
+
+More detailed:
+[QB+Def Features] → [LSTM Hidden(64)] → [Dense(64)] → [Dense(32)] → [5 predictions]
+                          ↑                 ↑            ↑
+                    Hidden Layer 1    Hidden Layer 2    Hidden Layer 3
+```
+
+**Think of it like a scout's thought process**:
+1. Input Layer: Raw game data
+   - "Mahomes threw for 300 yards last game"
+   - "Bills defense allowed 200 passing yards per game"
+
+2. First Hidden Layer (64 neurons):
+   - Learns basic patterns
+   - "Mahomes is on a hot streak"
+   - "Bills struggle against mobile QBs"
+
+3. Second Hidden Layer (32 neurons):
+   - Combines patterns
+   - "This matchup favors passing plays"
+   - "Weather conditions affect deep throws"
+
+4. Output Layer:
+   - Final predictions
+   - "Predict: 285 yards, 2 TDs"
+
+**Why Hidden Layers Matter**:
+- More layers = more complex patterns
+- Like having multiple scouts:
+  - Scout 1 watches the QB
+  - Scout 2 watches the defense
+  - Scout 3 combines their insights
+  - Head Scout makes final prediction
+
+**In Our Model**:
+1. LSTM Hidden States (64 dimensions)
+   - Remember important game patterns
+   - Track player development
+   - Notice trends
+
+2. Dense Hidden Layers
+   - Layer 1: 64 neurons
+   - Layer 2: 32 neurons
+   - Each helps refine predictions
+
+**Real-World Analogy**:
+Like a chef making a meal:
+- Input: Raw ingredients (stats)
+- Hidden Layer 1: Basic prep (chopping, seasoning)
+- Hidden Layer 2: Combining ingredients
+- Output: Final dish (predictions)
+
+**Why Multiple Layers?**:
+- Simple patterns combine into complex ones
+- Each layer specializes in different aspects
+- Helps model understand subtle relationships
+- More layers = more learning capacity
+
+**Trade-offs**:
+- More layers = better learning potential
+- But also:
+  - Longer training time
+  - More likely to overfit
+  - Needs more data
+  - Harder to train properly
 
 ## Training Concepts
 

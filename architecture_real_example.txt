@@ -1,0 +1,75 @@
+[EXAMPLE PREDICTION: Patrick Mahomes vs Buffalo Bills]
+1️⃣ INPUT LAYER
+┌─────────────────────────────────────────────┐
+│ QB HISTORY (Last 16 Games)                   │
+│ Game 1 (Most Recent): 331 yards, 3 TD, ...  │
+│ Game 2: 298 yards, 2 TD, ...                 │
+│ Game 3: 285 yards, 2 TD, ... │
+│ ... (13 more games) │
+└─────────────────────────────────────────────┘
+↓
+┌─────────────────────────────────────────────┐
+│ DEFENSE HISTORY (Bills, Last 8 Games) │
+│ Game 1: 245 pass yards allowed, 1 INT, ... │
+│ Game 2: 289 pass yards allowed, 2 INT, ... │
+│ ... (6 more games) │
+└─────────────────────────────────────────────┘
+2️⃣ NORMALIZATION LAYER
+┌─────────────────────────────────────────────┐
+│ QB Stats Normalized: │
+│ Yards: (331 - 280) / 75 = 0.68 │
+│ TDs: (3 - 2.1) / 1.2 = 0.75 │
+│ ... (other stats normalized) │
+└─────────────────────────────────────────────┘
+3️⃣ LSTM PROCESSING (64 dimensions)
+┌─────────────────────────────────────────────┐
+│ QB LSTM Output (example values): │
+│ [0.82, -0.14, 0.65, ..., 0.23] │
+│ │
+│ Defense LSTM Output: │
+│ [-0.31, 0.42, -0.15, ..., 0.11] │
+└─────────────────────────────────────────────┘
+4️⃣ EMBEDDINGS
+┌─────────────────────────────────────────────┐
+│ QB Embedding (Mahomes, 64-dim): │
+│ [0.75, 0.82, -0.23, ..., 0.45] │
+│ → Represents "Mahomes-ness" │
+│ │
+│ Team Embedding (Bills, 32-dim): │
+│ [0.31, -0.42, 0.55, ..., -0.12] │
+│ → Represents "Bills Defense Identity" │
+└─────────────────────────────────────────────┘
+5️⃣ CONCATENATED FEATURES (224 dimensions)
+┌─────────────────────────────────────────────┐
+│ [QB LSTM | DEF LSTM | QB EMB | TEAM EMB] │
+│ [0.82, ..., -0.31, ..., 0.75, ..., 0.31] │
+└─────────────────────────────────────────────┘
+↓
+6️⃣ DENSE LAYERS
+┌─────────────────────────────────────────────┐
+│ First Hidden Layer (64 neurons): │
+│ [0.56, 0.23, -0.45, ..., 0.12] │
+│ ↓ │
+│ Second Hidden Layer (32 neurons): │
+│ [0.34, -0.12, 0.67, ..., -0.23] │
+└─────────────────────────────────────────────┘
+↓
+7️⃣ OUTPUT LAYER (5 predictions)
+┌─────────────────────────────────────────────┐
+│ Final Predictions: │
+│ Passing Yards: 285.3 │
+│ Touchdowns: 2.3 │
+│ Interceptions: 0.8 │
+│ Completion %: 67.5 │
+│ Yards/Attempt: 7.8 │
+└─────────────────────────────────────────────┘
+
+QB Identity Track:
+"P.Mahomes" → 0 → Embedding[0] → [0.75, 0.82, ...]
+
+Game History Track:
+Game 1: 300 yards, 3 TDs    ↘
+Game 2: 285 yards, 2 TDs     → LSTM → Game patterns
+Game 3: 320 yards, 4 TDs    ↗
+
+Both connected by qb_idx = 0

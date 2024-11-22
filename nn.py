@@ -319,7 +319,7 @@ class QBPerformancePredictor(nn.Module):
         fc1_input_size = (2 * self.hidden_dim) + self.qb_embedding_dim + self.team_embedding_dim
         self.fc1 = nn.Linear(fc1_input_size, 64)
         self.fc2 = nn.Linear(64, 32)
-        self.fc3 = nn.Linear(32, 5)  # Changed from 17 to 5 outputs
+        self.fc3 = nn.Linear(32, 5)
         
         self.dropout = nn.Dropout(0.1)
         self.relu = nn.ReLU()
