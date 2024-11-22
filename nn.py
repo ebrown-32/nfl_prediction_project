@@ -7,6 +7,9 @@ import numpy as np
 import nfl_data_py as nfl
 from tabulate import tabulate
 import datetime
+import matplotlib.pyplot as plt
+from datetime import datetime
+import os
 
 """
 Author: ebrown
@@ -159,20 +162,8 @@ for idx, row in df.iterrows():
         row['yards_gained'],
         row['pass_touchdown'],
         row['interception'],
-        row['pass_attempt'],
-        row['air_yards'],
-        row['yards_after_catch'],
-        row['qb_hit'],
-        row['sack'],
-        row['short_passes'],
-        row['deep_passes'],
-        row['left_passes'],
-        row['middle_passes'],
-        row['right_passes'],
         row['completion_percentage'],
-        row['yards_per_attempt'],
-        row['sack_rate'],
-        row['deep_pass_rate']
+        row['yards_per_attempt']
     ])
 
 # Convert to arrays
@@ -328,7 +319,7 @@ class QBPerformancePredictor(nn.Module):
         fc1_input_size = (2 * self.hidden_dim) + self.qb_embedding_dim + self.team_embedding_dim
         self.fc1 = nn.Linear(fc1_input_size, 64)
         self.fc2 = nn.Linear(64, 32)
-        self.fc3 = nn.Linear(32, 17)  # 17 statistical categories to predict
+        self.fc3 = nn.Linear(32, 5)  # Changed from 17 to 5 outputs
         
         self.dropout = nn.Dropout(0.1)
         self.relu = nn.ReLU()
@@ -432,6 +423,10 @@ def stable_mse_loss(pred, target):
 criterion = stable_mse_loss
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-5)
 
+# At the start of training, initialize lists to store losses
+train_losses = []
+val_losses = []
+
 # Training loop
 print("Starting training...")
 num_epochs = 100
@@ -517,14 +512,18 @@ for epoch in range(num_epochs):
     # Calculate average losses for epoch
     if batch_count > 0:
         avg_train_loss = total_loss / batch_count
+        train_losses.append(avg_train_loss)
     else:
         avg_train_loss = float('nan')
+        train_losses.append(float('nan'))
         print(f"Warning: All training batches were skipped in epoch {epoch+1}")
     
     if val_batch_count > 0:
         avg_val_loss = val_loss / val_batch_count
+        val_losses.append(avg_val_loss)
     else:
         avg_val_loss = float('nan')
+        val_losses.append(float('nan'))
         print(f"Warning: All validation batches were skipped in epoch {epoch+1}")
     
     # Print progress every 10 epochs
@@ -585,23 +584,11 @@ def predict_qb_performance(qb_name, opponent_team):
         predictions = y_scaler.inverse_transform(scaled_pred)
     
     return {
-        'yards': predictions[0][0],
+        'passing_yards': predictions[0][0],
         'touchdowns': predictions[0][1],
-        'interception': predictions[0][2],
-        'attempts': predictions[0][3],
-        'air_yards': predictions[0][4],
-        'yards_after_catch': predictions[0][5],
-        'qb_hits': predictions[0][6],
-        'sacks': predictions[0][7],
-        'short_passes': predictions[0][8],
-        'deep_passes': predictions[0][9],
-        'left_passes': predictions[0][10],
-        'middle_passes': predictions[0][11],
-        'right_passes': predictions[0][12],
-        'completion_pct': predictions[0][13],
-        'yards_per_attempt': predictions[0][14],
-        'sack_rate': predictions[0][15],
-        'deep_pass_rate': predictions[0][16]
+        'interceptions': predictions[0][2],
+        'completion_percentage': predictions[0][3],
+        'yards_per_attempt': predictions[0][4]
     }
 
 def save_predictions_to_file(predictions_list, filename=None):
@@ -609,11 +596,11 @@ def save_predictions_to_file(predictions_list, filename=None):
     Save predictions to a formatted text file
     """
     if filename is None:
-        date = datetime.datetime.now().strftime("%Y%m%d")
-        filename = f"qb_predictions_{date}.txt"
+        date = datetime.now().strftime("%Y%m%d%S")
+        filename = f"predictions/qb_predictions_{date}.txt"
     
     with open(filename, 'w') as f:
-        f.write(f"QB Performance Predictions - Generated on {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        f.write(f"QB Performance Predictions - Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         
         for pred in predictions_list:
             qb_name = pred['qb']
@@ -625,44 +612,14 @@ def save_predictions_to_file(predictions_list, filename=None):
             
             # Core Stats Table
             core_stats = [
-                ["Yards", stats['yards']],
-                ["Touchdowns", stats['touchdowns']],
-                ["Interception", stats['interception']],
-                ["Attempts", stats['attempts']],
-                ["Completion %", stats['completion_pct']],
-                ["Yards/Attempt", stats['yards_per_attempt']]
+                ["Passing Yards", f"{stats['passing_yards']:.1f}"],
+                ["Touchdowns", f"{stats['touchdowns']:.1f}"],
+                ["Interceptions", f"{stats['interceptions']:.1f}"],
+                ["Completion %", f"{stats['completion_percentage']:.1f}%"],
+                ["Yards/Attempt", f"{stats['yards_per_attempt']:.1f}"]
             ]
             f.write("Core Stats:\n")
             f.write(tabulate(core_stats, tablefmt="grid") + "\n\n")
-            
-            # Pass Distribution Table
-            pass_dist = [
-                ["Short Passes", stats['short_passes']],
-                ["Deep Passes", stats['deep_passes']],
-                ["Deep Pass Rate", stats['deep_pass_rate']],
-                ["Left", stats['left_passes']],
-                ["Middle", stats['middle_passes']],
-                ["Right", stats['right_passes']]
-            ]
-            f.write("Pass Distribution:\n")
-            f.write(tabulate(pass_dist, tablefmt="grid") + "\n\n")
-            
-            # Protection Table
-            protection = [
-                ["QB Hits", stats['qb_hits']],
-                ["Sacks", stats['sacks']],
-                ["Sack Rate", stats['sack_rate']]
-            ]
-            f.write("Protection Metrics:\n")
-            f.write(tabulate(protection, tablefmt="grid") + "\n\n")
-            
-            # Yardage Table
-            yardage = [
-                ["Air Yards (Avg.)", stats['air_yards']],
-                ["Yards After Catch (Avg.)", stats['yards_after_catch']]
-            ]
-            f.write("Yardage Breakdown:\n")
-            f.write(tabulate(yardage, tablefmt="grid") + "\n\n")
             f.write("\n" + "-" * 50 + "\n")
 
 # List of QBs and opponents to predict
@@ -724,10 +681,58 @@ predictions_list = [
     }
 ]
 
-# Save predictions to file
 save_predictions_to_file(predictions_list)
-
-# Still print to console as well
 print("\nPredictions have been saved to file!")
+
+# After training loop ends, create and save the plot
+def plot_training_history(train_losses, val_losses):
+    """
+    Creates and saves a plot of training history.
+    
+    Args:
+        train_losses (list): Training loss values per epoch
+        val_losses (list): Validation loss values per epoch
+    """
+    plt.figure(figsize=(10, 6))
+    plt.plot(train_losses, label='Training Loss', color='blue', alpha=0.7)
+    plt.plot(val_losses, label='Validation Loss', color='red', alpha=0.7)
+    
+    plt.title('QB Core Stats Prediction - Training History')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss (MSE)')
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    
+    # Add min/max annotations
+    min_train = min(train_losses)
+    min_val = min(val_losses)
+    plt.annotate(f'Min Train: {min_train:.4f}', 
+                xy=(train_losses.index(min_train), min_train),
+                xytext=(10, 10), textcoords='offset points')
+    plt.annotate(f'Min Val: {min_val:.4f}', 
+                xy=(val_losses.index(min_val), min_val),
+                xytext=(10, -10), textcoords='offset points')
+    
+    # Save the plot with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    plt.savefig(os.path.join('training', f'training_history_{timestamp}.png'), 
+                dpi=300, bbox_inches='tight')
+    plt.close()
+
+plot_training_history(train_losses, val_losses)
+
+def save_model(model, filename=None):
+    """
+    Save the trained model in the training directory
+    """
+    if filename is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f'qb_predictor_{timestamp}.pth'
+    
+    model_path = os.path.join('training', filename)
+    torch.save(model.state_dict(), model_path)
+    print(f"Model saved to {model_path}")
+    
+save_model(model)
 
 

@@ -118,7 +118,7 @@ Where:
 ## Data Processing
 
 ### Input Data
-- Source: NFL play-by-play data (2022-2024)
+- Source: NFL play-by-play data (2022-2024) from nfl-data-py (https://pypi.org/project/nfl-data-py/)
 - Aggregated to game level
 - Features normalized using StandardScaler
 - Sequences padded to fixed length
