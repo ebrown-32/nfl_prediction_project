@@ -14,6 +14,12 @@ Just like how a human scout would remember key trends but forget unimportant det
 **Technical**: Dense vector representations of discrete entities
 **Simple Explanation**: Converting names into numbers in a smart way. Instead of just saying "Patrick Mahomes = 1", we create a detailed numerical "profile" that captures different aspects of his playing style. Like having multiple scores for different skills.
 
+Example:
+QB Name → Integer → Learned Embedding Vector
+"P.Mahomes" → 0 → [0.75, 0.82, -0.23, ..., 0.45]  # 64 numbers
+"J.Allen"   → 1 → [0.62, -0.45, 0.31, ..., 0.28]  # 64 numbers
+"L.Jackson" → 2 → [0.91, 0.15, 0.44, ..., -0.12]  # 64 numbers
+
 ### Layer Normalization
 **Technical**: Normalizes inputs across features to stabilize training
 **Simple Explanation**: Like grading on a curve in school - converts all numbers to a similar scale so they can be compared fairly. This helps the model learn without being overwhelmed by very large or very small numbers.
