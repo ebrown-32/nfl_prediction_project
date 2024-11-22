@@ -8,6 +8,20 @@ import nfl_data_py as nfl
 from tabulate import tabulate
 import datetime
 
+"""
+Author: ebrown
+Date: 11/20/2024
+Purpose: Predict QB performance in an upcoming (hypothetical) NFL game based on recent form and opponent defense
+Contributors: shout out to Claude Sonnet 3.5 for assistance with the architecture implementation
+"""
+
+#TODO:
+# - Add weather conditions
+# - Add home/away factor
+# - Add formations
+# - Add receiver corps quality metrics
+# Adjust recent game weighting... maybe linear is better?
+
 # Load and process NFL data
 """ years = [2022, 2023, 2024]
 
@@ -651,7 +665,7 @@ def save_predictions_to_file(predictions_list, filename=None):
             f.write(tabulate(yardage, tablefmt="grid") + "\n\n")
             f.write("\n" + "-" * 50 + "\n")
 
-# Create predictions list
+# List of QBs and opponents to predict
 predictions_list = [
     {
         'qb': "Patrick Mahomes",
