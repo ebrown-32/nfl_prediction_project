@@ -20,6 +20,8 @@ Contributors: shout out to Claude Sonnet 3.5 for assistance with the architectur
 
 #TODO:
 # - Add weather conditions
+# - QBs should not have their game history limited
+# - Defense should look back 32 games
 # - Add home/away factor
 # - Add formations
 # - Add receiver corps quality metrics
