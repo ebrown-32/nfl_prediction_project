@@ -63,3 +63,13 @@
 │ Completion %: 67.5 │
 │ Yards/Attempt: 7.8 │
 └─────────────────────────────────────────────┘
+
+QB Identity Track:
+"P.Mahomes" → 0 → Embedding[0] → [0.75, 0.82, ...]
+
+Game History Track:
+Game 1: 300 yards, 3 TDs    ↘
+Game 2: 285 yards, 2 TDs     → LSTM → Game patterns
+Game 3: 320 yards, 4 TDs    ↗
+
+Both connected by qb_idx = 0
