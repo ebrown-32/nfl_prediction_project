@@ -84,3 +84,32 @@ print("\nPass location distribution:")
 print(f"Left: {(game_data['left_passes'] / game_data['pass_attempt']).mean()*100:.1f}%")
 print(f"Middle: {(game_data['middle_passes'] / game_data['pass_attempt']).mean()*100:.1f}%")
 print(f"Right: {(game_data['right_passes'] / game_data['pass_attempt']).mean()*100:.1f}%")
+
+def create_play_by_play_sequences(play_by_play, qb_name, game_id, max_plays=100):
+    """
+    Create a sequence of play-by-play data for a specific game and quarterback.
+    """
+    qb_plays = play_by_play[(play_by_play['passer_player_name'] == qb_name) & 
+                            (play_by_play['game_id'] == game_id)]
+    qb_plays = qb_plays.head(max_plays)  # Limit to max_plays
+
+    sequence = []
+    for _, play in qb_plays.iterrows():
+        play_stats = [
+            play['yards_gained'] if not np.isnan(play['yards_gained']) else 0,
+            play['pass_touchdown'] if not np.isnan(play['pass_touchdown']) else 0,
+            play['interception'] if not np.isnan(play['interception']) else 0,
+            play['air_yards'] if not np.isnan(play['air_yards']) else 0,
+            play['yards_after_catch'] if not np.isnan(play['yards_after_catch']) else 0,
+            play['qb_hit'] if not np.isnan(play['qb_hit']) else 0,
+            play['sack'] if not np.isnan(play['sack']) else 0
+        ]
+        sequence.append(play_stats)
+
+    sequence = np.array(sequence)
+
+    if len(sequence) < max_plays:
+        padding = np.zeros((max_plays - len(sequence), len(play_stats)))
+        sequence = np.vstack([sequence, padding])
+
+    return sequence
