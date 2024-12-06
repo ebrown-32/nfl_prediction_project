@@ -325,3 +325,132 @@ Input Features (18-dim)
    - Recent plays weighted more heavily
    - Linear weighting from 1.0 to 1.5
    - Weights applied before sequence truncation
+
+# Play-to-Game Mapping Documentation
+
+## Non-Technical Explanation
+
+Imagine you're trying to predict how well Patrick Mahomes will play in an upcoming game against the Bills. You would:
+1. Look at all of Mahomes' previous plays this season
+2. Look at all plays against the Bills' defense this season
+3. Use this history to predict Mahomes' stats in the upcoming game
+
+For each historical game in our dataset:
+- INPUT: All plays by that QB and against that defense from before the game
+- OUTPUT: The QB's actual stats from that game
+
+For example:
+```
+Game: Chiefs vs Bills (Week 6, 2023)
+Input:
+  - All Mahomes plays from Weeks 1-5
+  - All plays against Bills defense from Weeks 1-5
+Target:
+  - Mahomes' actual stats from the Week 6 game
+```
+
+## Technical Explanation
+
+### 1. Data Organization
+```python
+# First, group all plays by game to get game-level stats
+game_stats = pass_plays.groupby(['game_id', 'passer_player_name', 'defteam']).agg({
+    'yards_gained': 'sum',
+    'pass_touchdown': 'sum',
+    'interception': 'sum',
+    'complete_pass': 'sum',
+    'pass_attempt': 'sum',
+    'sack': 'sum'
+})
+
+# For each game:
+for game_id, game in game_stats.iterrows():
+    # Get all plays BEFORE this game
+    qb_sequence = plays[
+        (plays['passer_player_name'] == game['passer_player_name']) &
+        (plays['game_id'] < game['game_id'])
+    ]
+    
+    def_sequence = plays[
+        (plays['defteam'] == game['defteam']) &
+        (plays['game_id'] < game['game_id'])
+    ]
+    
+    # Target is the actual stats FROM this game
+    target = [
+        game['yards_gained'],
+        game['pass_touchdown'],
+        game['interception'],
+        game['completion_percentage'],
+        game['sack']
+    ]
+```
+
+### 2. Training Example Structure
+
+Each training example consists of:
+
+**Inputs:**
+- QB sequence: `[num_plays x 18]` matrix of historical plays
+- Defense sequence: `[num_plays x 18]` matrix of historical plays
+- QB index: Integer identifying the quarterback
+- Team index: Integer identifying the defense
+
+**Target:**
+- 5-dimensional vector of game stats:
+  1. Yards gained
+  2. Pass touchdowns
+  3. Interceptions
+  4. Completion percentage
+  5. Sacks
+
+### 3. Visual Example
+
+```
+Game ID: 2023_KC_BUF_W6
+┌─────────────────────────────┐
+│ INPUT                       │
+├─────────────────────────────┤
+│ QB Sequence (Mahomes)       │
+│ ├── Week 1 plays           │
+│ ├── Week 2 plays           │
+│ ├── Week 3 plays           │
+│ ├── Week 4 plays           │
+│ └── Week 5 plays           │
+│                             │
+│ Defense Sequence (Bills)    │
+│ ├── Week 1 plays           │
+│ ├── Week 2 plays           │
+│ ├── Week 3 plays           │
+│ ├── Week 4 plays           │
+│ └── Week 5 plays           │
+└─────────────────────────────┘
+           │
+           ▼
+┌─────────────────────────────┐
+│ TARGET                      │
+├─────────────────────────────┤
+│ Week 6 Game Stats           │
+│ ├── 315 yards              │
+│ ├── 3 touchdowns           │
+│ ├── 0 interceptions        │
+│ ├── 68.4% completion       │
+│ └── 1 sack                 │
+└─────────────────────────────┘
+```
+
+### 4. Key Points
+
+1. **Temporal Ordering**
+   - Only plays that occurred before a game are used to predict that game's stats
+   - This prevents data leakage and mimics real-world prediction scenarios
+
+2. **Sequence Processing**
+   - Recent plays are weighted more heavily (1.0 to 1.5 linear scaling)
+   - Sequences are capped at 2000 plays
+   - Shorter sequences are padded with zeros
+
+3. **Game-Level Aggregation**
+   - Individual plays are never predicted
+   - Model learns to map sequences directly to game-level statistics
+   - This approach captures both recent form and matchup dynamics
