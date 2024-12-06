@@ -10,6 +10,13 @@
 - Decide what's worth paying attention to
 Just like how a human scout would remember key trends but forget unimportant details.
 
+### Bidirectional LSTM
+**Technical**: LSTM that processes sequences in both forward and backward directions
+**Simple Explanation**: Like having two scouts watch the same games:
+- One watches games in order (start to end of season)
+- One watches games in reverse (end to start of season)
+- Both perspectives combined give better insights
+
 ### Embeddings
 **Technical**: Dense vector representations of discrete entities
 **Simple Explanation**: Converting names into numbers in a smart way. Instead of just saying "Patrick Mahomes = 1", we create a detailed numerical "profile" that captures different aspects of his playing style. Like having multiple scores for different skills.
@@ -23,6 +30,86 @@ QB Name → Integer → Learned Embedding Vector
 ### Layer Normalization
 **Technical**: Normalizes inputs across features to stabilize training
 **Simple Explanation**: Like grading on a curve in school - converts all numbers to a similar scale so they can be compared fairly. This helps the model learn without being overwhelmed by very large or very small numbers.
+
+## Sequence Processing
+
+### Temporal Splitting
+**Technical**: Dividing data chronologically rather than randomly
+**Simple Explanation**: Like testing a scout's predictions:
+- Train them on 2022-2023 games
+- Test them on 2024 games
+This is more realistic than mixing future and past games together.
+
+### Sequence Length
+**Technical**: Fixed-length windows of historical games (32 for QB, 16 for defense)
+**Simple Explanation**: Looking at:
+- Last 32 games for QB performance
+- Last 16 games for defensive performance
+Like a scout focusing on recent history but with enough games to spot patterns.
+
+### Feature Sets
+**QB Features** (16 total):
+1. Basic Stats:
+   - Yards gained
+   - Touchdowns
+   - Pass attempts
+   - Air yards
+   - Yards after catch
+
+2. Protection Metrics:
+   - QB hits
+   - Sacks
+
+3. Pass Distribution:
+   - Short passes
+   - Deep passes
+   - Left passes
+   - Middle passes
+   - Right passes
+
+4. Efficiency Metrics:
+   - Completion percentage
+   - Yards per attempt
+   - Sack rate
+   - Deep pass rate
+
+**Defense Features** (11 total):
+1. Basic Stats:
+   - Yards allowed
+   - Touchdowns allowed
+   - Pass attempts against
+   - Air yards allowed
+   - Yards after catch allowed
+
+2. Pressure Stats:
+   - QB hits
+   - Sacks
+
+3. Coverage Stats:
+   - Short passes allowed
+   - Deep passes allowed
+
+4. Efficiency Metrics:
+   - Completion percentage allowed
+   - Sack rate
+
+## Training Concepts
+
+### Loss Functions
+**Technical**: Mathematical measure of prediction error (MSE)
+**Simple Explanation**: Like a score that shows how far off the predictions are. If predicting 300 passing yards and the actual was 250, the loss function measures how bad that miss was. Lower score = better predictions.
+
+### Gradient Descent
+**Technical**: Optimization algorithm that minimizes loss by adjusting weights
+**Simple Explanation**: Like playing "hot and cold" - the model makes a prediction, sees how wrong it was, and adjusts to get "warmer". It keeps doing this until it can't get any better.
+
+### Early Stopping
+**Technical**: Technique to prevent overfitting by monitoring validation loss
+**Simple Explanation**: Knowing when to stop practicing. Just like how over-practicing one specific game plan might make you worse against new opponents, we stop training when the model stops getting better at predicting new games.
+
+### Batch Processing
+**Technical**: Training on small subsets of data at a time
+**Simple Explanation**: Like studying flashcards in small groups instead of trying to memorize the whole deck at once. It's more manageable and helps learn patterns better.
 
 ## Neural Network Layers
 
@@ -100,24 +187,6 @@ Like a chef making a meal:
   - Needs more data
   - Harder to train properly
 
-## Training Concepts
-
-### Loss Functions
-**Technical**: Mathematical measure of prediction error (MSE)
-**Simple Explanation**: Like a score that shows how far off the predictions are. If predicting 300 passing yards and the actual was 250, the loss function measures how bad that miss was. Lower score = better predictions.
-
-### Gradient Descent
-**Technical**: Optimization algorithm that minimizes loss by adjusting weights
-**Simple Explanation**: Like playing "hot and cold" - the model makes a prediction, sees how wrong it was, and adjusts to get "warmer". It keeps doing this until it can't get any better.
-
-### Early Stopping
-**Technical**: Technique to prevent overfitting by monitoring validation loss
-**Simple Explanation**: Knowing when to stop practicing. Just like how over-practicing one specific game plan might make you worse against new opponents, we stop training when the model stops getting better at predicting new games.
-
-### Batch Processing
-**Technical**: Training on small subsets of data at a time
-**Simple Explanation**: Like studying flashcards in small groups instead of trying to memorize the whole deck at once. It's more manageable and helps learn patterns better.
-
 ## Model Components
 
 ### Sequence Processing
@@ -141,8 +210,6 @@ Like a chef making a meal:
 ### Train-Test Split
 **Technical**: Dividing data into training (80%) and testing (20%) sets
 **Simple Explanation**: Like practicing plays (training) vs using them in a real game (testing). We hold back some data to make sure our predictions work on games the model hasn't seen before.
-
-## Evaluation Metrics
 
 ## Evaluation Metrics
 
