@@ -52,29 +52,49 @@ game_data.to_csv('game_data.csv', index=False) """
 # Load aggregated data
 df = pd.read_csv('game_data.csv')
 
-# Sort by game_id to ensure chronological order
-df = df.sort_values('game_id')
+# Sort by season and week to ensure chronological order
+df = df.sort_values(['season', 'week'])
+
+# Print dataset information
+print("\nDataset Information:")
+print(f"Seasons covered: {df['season'].unique()}")
+print(f"Weeks per season: {df.groupby('season')['week'].nunique()}")
+print(f"Total games: {len(df)}")
+
+# Calculate split points (use last 20% of games as validation)
+cutoff_idx = int(len(df) * 0.8)
+train_idx = np.arange(cutoff_idx)
+test_idx = np.arange(cutoff_idx, len(df))
+
+print("\nSplit Information:")
+print(f"Training games: {len(train_idx)} ({df.iloc[train_idx]['season'].min()}-{df.iloc[train_idx]['season'].max()}, Weeks {df.iloc[train_idx]['week'].min()}-{df.iloc[train_idx]['week'].max()})")
+print(f"Validation games: {len(test_idx)} ({df.iloc[test_idx]['season'].min()}-{df.iloc[test_idx]['season'].max()}, Weeks {df.iloc[test_idx]['week'].min()}-{df.iloc[test_idx]['week'].max()})")
+
+# Create QB and team mappings only from training data
+train_data = df.iloc[train_idx]
+qb_to_idx = {qb: idx for idx, qb in enumerate(train_data['passer_player_name'].unique())}
+team_to_idx = {team: idx for idx, team in enumerate(train_data['defteam'].unique())}
+
+# Handle potential new QBs/teams in validation set
+def get_qb_idx(qb):
+    return qb_to_idx.get(qb, len(qb_to_idx))  # Return special index for unknown QBs
+
+def get_team_idx(team):
+    return team_to_idx.get(team, len(team_to_idx))  # Return special index for unknown teams
 
 def create_sequence_features(df, qb_name, game_idx, max_history=32):
     """
     Creates a sequence of game statistics for a quarterback's recent performances.
     
     Sequence Processing Explanation:
-    - Design decision: the order of games matters (recent form, development, etc.)
+    - Design decision: the order of games matters (development, patterns, etc.)
     - We take the last 32 games (max_history) for each QB
-    - More recent games are weighted more heavily using linear weighting
-    
-    Example:
-    For Patrick Mahomes predicting Week 10:
-    - Week 9: weight = 0.5
-    - Week 8: weight = 0.6
-    - Week 7: weight = 0.7
-    ...and so on, giving more importance to recent performances
+    - No weighting applied - let the model learn temporal importance
     """
     qb_games = df[df['passer_player_name'] == qb_name]
     previous_games = qb_games[qb_games.index < game_idx].tail(max_history)
     
-    # Create sequence with linear weighting
+    # Create sequence without weighting
     sequence = []
     for _, game in previous_games.iterrows():
         game_stats = [
@@ -99,11 +119,7 @@ def create_sequence_features(df, qb_name, game_idx, max_history=32):
     
     sequence = np.array(sequence)
     
-    # Apply linear weighting to emphasize recent games
-    if len(sequence) > 0:
-        weights = np.linspace(0.5, 1.0, len(sequence))
-        sequence = sequence * weights[:, np.newaxis]
-    
+    # Pad sequence if needed
     if len(sequence) < max_history:
         padding = np.zeros((max_history - len(sequence), 16))
         sequence = np.vstack([padding, sequence]) if len(sequence) > 0 else padding
@@ -112,7 +128,7 @@ def create_sequence_features(df, qb_name, game_idx, max_history=32):
 
 def create_defense_sequence(df, def_team, game_idx, max_history=16):
     """
-    Create sequence of defensive performances with better handling of missing values
+    Create sequence of defensive performances without weighting
     """
     def_games = df[df['defteam'] == def_team]
     previous_games = def_games[def_games.index < game_idx].tail(max_history)
@@ -135,10 +151,6 @@ def create_defense_sequence(df, def_team, game_idx, max_history=16):
         sequence.append(game_stats)
     
     sequence = np.array(sequence)
-    
-    if len(sequence) > 0:
-        weights = np.linspace(0.5, 1.0, len(sequence))
-        sequence = sequence * weights[:, np.newaxis]
     
     if len(sequence) < max_history:
         padding = np.zeros((max_history - len(sequence), 11))
@@ -217,8 +229,8 @@ class NFLDataset(Dataset):
         self.X_qb = torch.FloatTensor(X_qb[indices])          
         self.X_def = torch.FloatTensor(X_def[indices])        
         self.y = torch.FloatTensor(y[indices])                
-        self.qb_idx = torch.LongTensor([qb_to_idx[qb] for qb in qb_names[indices]])
-        self.team_idx = torch.LongTensor([team_to_idx[team] for team in def_teams[indices]]) 
+        self.qb_idx = torch.LongTensor([get_qb_idx(qb) for qb in qb_names[indices]])
+        self.team_idx = torch.LongTensor([get_team_idx(team) for team in def_teams[indices]]) 
     
     def __len__(self):
         return len(self.y)
@@ -311,8 +323,8 @@ class QBPerformancePredictor(nn.Module):
         self.qb_embedding_dim = 64    # Higher dim for QB (more complex patterns)
         self.team_embedding_dim = 32   # Lower dim for defense (less complex patterns)
         
-        self.qb_embedding = nn.Embedding(num_qbs, self.qb_embedding_dim)
-        self.team_embedding = nn.Embedding(num_teams, self.team_embedding_dim)
+        self.qb_embedding = nn.Embedding(num_qbs + 1, self.qb_embedding_dim)
+        self.team_embedding = nn.Embedding(num_teams + 1, self.team_embedding_dim)
         
         # QB-specific attention for focusing on relevant historical patterns
         self.qb_attention = nn.MultiheadAttention(embed_dim=self.hidden_dim, num_heads=4)

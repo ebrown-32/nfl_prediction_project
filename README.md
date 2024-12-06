@@ -19,21 +19,39 @@ This deep learning model predicts NFL quarterback performance statistics for hyp
 The model processes four key input components:
 
 #### 1. QB Historical Sequence (X_q)
-- Dimension: ℝ^(16×16) (16 games × 16 features)
-- Features include: yards, touchdowns, attempts, completion percentage, etc.
-- Exponentially weighted for recency:
-  ```
-  w_t = exp(-λ(T-t))
-  where:
-  - t is the game index
-  - T is the most recent game
-  - λ is the decay factor
-  ```
+- Dimension: ℝ^(32×16) (32 games × 16 features)
+- Features include:
+  - yards_gained
+  - pass_touchdown
+  - pass_attempt
+  - air_yards
+  - yards_after_catch
+  - qb_hit
+  - sack
+  - short_passes
+  - deep_passes
+  - left_passes
+  - middle_passes
+  - right_passes
+  - completion_percentage
+  - yards_per_attempt
+  - sack_rate
+  - deep_pass_rate
 
 #### 2. Defense Historical Sequence (X_d)
-- Dimension: ℝ^(8×11) (8 games × 11 features)
-- Captures defensive performance patterns
-- Similarly weighted for recency
+- Dimension: ℝ^(16×11) (16 games × 11 features)
+- Features include:
+  - yards_gained
+  - pass_touchdown
+  - pass_attempt
+  - air_yards
+  - yards_after_catch
+  - qb_hit
+  - sack
+  - short_passes
+  - deep_passes
+  - completion_percentage
+  - sack_rate
 
 #### 3. QB Identity Embedding (E_q)
 - Dimension: ℝ⁶⁴
@@ -44,9 +62,17 @@ The model processes four key input components:
 - Dimension: ℝ³²
 - Learned representation of defensive team characteristics
 
+### Temporal Processing
+
+The model uses a temporal approach to data organization:
+1. Data is chronologically ordered by season and week
+2. Training set uses first 80% of games
+3. Validation set uses last 20% of games
+4. No artificial weighting of recent games - temporal patterns learned by LSTM
+
 ### LSTM Architecture
 
-The model uses Long Short-Term Memory (LSTM) networks to process sequential data. The LSTM cell is defined by:
+The model uses bidirectional Long Short-Term Memory (LSTM) networks to process sequential data:
 
 ```
 f_t = σ(W_f · [h_t-1, x_t] + b_f)    # Forget gate
@@ -56,13 +82,6 @@ C_t = f_t * C_t-1 + i_t * C̃_t        # Cell state
 o_t = σ(W_o · [h_t-1, x_t] + b_o)    # Output gate
 h_t = o_t * tanh(C_t)                # Hidden state
 ```
-
-Where:
-- h_t is the hidden state at time t
-- C_t is the cell state at time t
-- x_t is the input at time t
-- W and b are learned parameters
-- σ is the sigmoid function
 
 ### Prediction Process
 
@@ -74,8 +93,8 @@ Where:
 
 2. **LSTM Processing**:
    ```
-   h_q = LSTM(X̂_q)
-   h_d = LSTM(X̂_d)
+   h_q = BiLSTM(X̂_q)  # Bidirectional processing
+   h_d = BiLSTM(X̂_d)  # Bidirectional processing
    ```
 
 3. **Feature Combination**:
@@ -87,23 +106,9 @@ Where:
    ```
    y = MLP(z)
    ```
-   where y ∈ ℝ¹⁷ represents 17 predicted statistical categories
+   where y ∈ ℝ⁵ represents 5 predicted statistical categories
 
 ## Model Architecture
-Input → Normalization → LSTM Processing → Embeddings → Attention → Dense Layers → Prediction
-
-QB Data    →  Norm → LSTM(2) ↘
-                            → Concat → Attention → Dense(3) → Output
-Defense Data → Norm → LSTM(2) ↗
-
-Total Layer Count: 12 main layers
-Input Normalization (2)
-QB LSTM Stack (2)
-Defense LSTM Stack (2)
-Embeddings (2)
-Attention Layer (1)
-QB-specific Layer (1)
-Final Dense Layers (3)
 
 ### Network Components
 
@@ -112,9 +117,9 @@ Final Dense Layers (3)
    - Applied to both QB and defensive sequences
 
 2. **LSTM Layers**
-   - 2 stacked LSTM layers for both QB and defense sequences
+   - 2 stacked bidirectional LSTM layers for both QB and defense sequences
    - Hidden dimension: 64
-   - Dropout: 0.1
+   - Dropout: 0.2
    - Batch-first processing
 
 3. **Attention Mechanism**
@@ -125,9 +130,9 @@ Final Dense Layers (3)
 4. **Fully Connected Layers**
    - FC1: Input → 64 units
    - FC2: 64 → 32 units
-   - FC3: 32 → 17 units (final predictions)
+   - FC3: 32 → 5 units (final predictions)
    - ReLU activation between layers
-   - Dropout: 0.1
+   - Dropout: 0.2
 
 ## Data Processing
 
@@ -136,15 +141,16 @@ Final Dense Layers (3)
 - Aggregated to game level
 - Features normalized using StandardScaler
 - Sequences padded to fixed length
+- Temporal ordering preserved
 
 ### Sequence Creation
 ```python
-def create_sequence_features(df, qb_name, game_idx, max_history=16):
+def create_sequence_features(df, qb_name, game_idx, max_history=32):
     # Get QB's previous games
     qb_games = df[df['passer_player_name'] == qb_name]
     previous_games = qb_games[qb_games.index < game_idx].tail(max_history)
     
-    # Create and weight sequence
+    # Create sequence without weighting
     sequence = []
     for _, game in previous_games.iterrows():
         game_stats = [
