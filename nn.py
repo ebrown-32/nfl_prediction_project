@@ -395,7 +395,7 @@ class QBPerformancePredictor(nn.Module):
         x = self.dropout(x)
         x = self.relu(self.fc2(x))
         x = self.dropout(x)
-        x = self.fc3(x)  # Final prediction of 17 statistical categories
+        x = self.fc3(x)  # Final prediction of 5 statistical categories
         
         return x
 
