@@ -1,7 +1,9 @@
-# QB Performance Predictor
+# National Football League (NFL) QB Performance Predictor
 
-## Overview
-A deep learning sequence-to-regression model that predicts quarterback game-level statistics using historical play-by-play data. The model maps sequences of historical plays to continuous game-level statistical predictions using a transformer-based architecture.
+## Brief Overview
+This was a project I did @ the University of Nebraska-Lincoln in Math 435. The fantasy sports space is expected to become a nearly $100B industry by 2032. This project aims to help people make data-driven decisions to win bragging rights over their friends and family. The final deliverable is a deep learning sequence-to-regression model that predicts quarterback game-level statistics using historical play-by-play data. The model maps sequences of historical plays to continuous game-level statistical predictions using a transformer-based architecture.
+
+Our course was very focused on the foundational mathematics in machine learning. As a result, what's provided in this project is more of a basic skeleton of a few different approaches to predict QB performance in a hypothetical matchup. Overall training results have room for improvement, but feel free to check out /training and documentation.md for a more technical deep dive.
 
 ## Model Type
 - **Input**: Sequences of play-by-play data
